@@ -12,6 +12,8 @@ import time
 import dlib
 import cv2
 import glob
+import collections as co
+APPROXIMATE_CATE = 20
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-p", "--shape-predictor", required=True,
@@ -64,7 +66,7 @@ def getSVM(datasetFrame):
         normDist = []
         for index in range(len(dist)):
             dist[index] = round((dist[index]-minDist)/difMinMax,4)
-    return dist
+    return [datasetFrame,dist]
 
 
 def trainDataset():
@@ -72,7 +74,7 @@ def trainDataset():
     for imgDir in glob.glob('./dataset/*.tiff'):
         trainFile.write(imgDir+'\n')
         datasetFrame = cv2.imread(imgDir)
-        dist = getSVM(datasetFrame)
+        dist = getSVM(datasetFrame)[1]
         for i in dist:
             trainFile.write(str(i)+' ')
         trainFile.write('\n')
@@ -102,6 +104,33 @@ def findLessDifOffset(sumdif):
             mindif,index = v, i
     return index
 
+def findCategory(imageDir): #happy, sad, neutral, suprise, angry, fear, digust
+    return (imageDir.split('.')[2])[:2]
+    
+def getKeyWithMaxValue(d):
+    maxV = -1
+    key = ""
+    for k,v in d.items():
+        if v > maxV:
+            key = k
+            maxV = v
+    if key == "HA":
+        return "HAPPY"
+    elif key == "AN":
+        return "ANGRY"
+    elif key == "DI":
+        return "DIGUST"
+    elif key == "SA":
+        return "SAD"
+    elif key == "NE":
+        return "NEUTRAL"
+    elif key == "SU":
+        return "SUPRISE"
+    elif key == "FE":
+        return "FEAR"
+    return key
+
+
 if __name__ == "__main__":
 
     globDir = []
@@ -109,23 +138,29 @@ if __name__ == "__main__":
     if args["train"]:
         trainDataset()
     readTrain()
-    count = 20
+    count = APPROXIMATE_CATE
+    d = co.defaultdict(lambda: 0)
     while True:
         # grab the frame from the threaded video stream, resize it to
         # have a maximum width of 400 pixels, and convert it to
         # grayscale
         frame = vs.read()
-        
-        vsSVM = getSVM(frame)
+        frame, vsSVM = getSVM(frame)
         if vsSVM != []:
             dif = []
-            
             for svmFrame in svmDataset:
                 sumdif = 1.0
                 for difIndex in range(len(svmFrame)):
                     sumdif += abs(vsSVM[difIndex]-svmFrame[difIndex])
                 dif.append(round(sumdif,4))
-            print globDir[findLessDifOffset(dif)]
+            if count:
+                d[findCategory(globDir[findLessDifOffset(dif)])] += 1
+                count -= 1
+            else:
+                count = APPROXIMATE_CATE
+                print getKeyWithMaxValue(d)
+                
+                d = co.defaultdict(lambda: 0)
 
         # show the frame
         cv2.imshow("Frame", frame)
