@@ -18,6 +18,9 @@ ap.add_argument("-p", "--shape-predictor", required=True,
                 help="path to facial landmark predictor")
 ap.add_argument("-r", "--picamera", type=int, default=-1,
                 help="whether or not the Raspberry Pi camera should be used")
+ap.add_argument("-t", "--train", type=int, default=0,
+                help="set 1 when to re-train the data")
+
 args = vars(ap.parse_args())
 
 # initialize dlib's face detector (HOG-based) and then create
@@ -33,77 +36,96 @@ time.sleep(2.0)
 # loop over the frames from the video stream
 
 
+def getSVM(datasetFrame):
+    datasetFrame = imutils.resize(datasetFrame, width=400)
+    datasetGray = cv2.cvtColor(datasetFrame, cv2.COLOR_BGR2GRAY)
+    datasetRects = detector(datasetGray, 0)
+    dist = []
+    for rect in datasetRects:
+        shape = predictor(datasetGray, rect)
+        shape = face_utils.shape_to_np(shape)
+        listx = []
+        listy = []
+        sumx = 0
+        sumy = 0
+        for (x, y) in shape:
+            listx.append(x)
+            listy.append(y)
+            sumx += x
+            sumy += y
+        meanx = sumx / 68
+        meany = sumy / 68
+        
+        for x, y in zip(listx, listy):
+            dist.append (round(((x-meanx)**2 + (y-meany)**2)**.5, 4))
+        minDist = min(dist)
+        maxDist = max(dist)
+        difMinMax = maxDist-minDist
+        normDist = []
+        for index in range(len(dist)):
+            dist[index] = round((dist[index]-minDist)/difMinMax,4)
+    return dist
+
+
 def trainDataset():
     trainFile = open("train.dat", "w")
     for imgDir in glob.glob('./dataset/*.tiff'):
         trainFile.write(imgDir+'\n')
-    	datasetFrame = cv2.imread(imgDir)
-    	datasetFrame = imutils.resize(datasetFrame, width=400)
-    	datasetGray = cv2.cvtColor(datasetFrame, cv2.COLOR_BGR2GRAY)
-    	datasetRects = detector(datasetGray, 0)
-        for rect in datasetRects:
-            shape = predictor(datasetGray, rect)
-            shape = face_utils.shape_to_np(shape)
-            if len(shape):
-                for (x,y) in shape:
-                    trainFile.write(str(x)+' '+str(y)+'\n')
+        datasetFrame = cv2.imread(imgDir)
+        dist = getSVM(datasetFrame)
+        for i in dist:
+            trainFile.write(str(i)+' ')
+        trainFile.write('\n')
+
     trainFile.close()
 
 
 def readTrain():
     trainFile = open("train.dat", "r")
-    global globDir, pointDataset
-    tmp = []
+    global globDir, svmDataset
     count = 0
     lines = trainFile.readlines()
-
+    tmp = []
     for line in lines:
-        if count%69:
-            x,y = line.split()
-            tmp.append([int(x),int(y)])       
+        if count % 2:
+            tmp = map(float, line.split())
+            svmDataset.append(tmp)
         else:
-            if len(tmp):
-                pointDataset.append(tmp)  
-                tmp = []
             globDir.append(line)
         count += 1
-    pointDataset.append(tmp)
 
+def findLessDifOffset(sumdif):
+    mindif = sumdif[0]
+    index = 0
+    for i,v in enumerate(sumdif):
+        if v < mindif:
+            mindif,index = v, i
+    return index
 
 if __name__ == "__main__":
+
     globDir = []
-    pointDataset = []
-    
-    trainDataset()
+    svmDataset = []
+    if args["train"]:
+        trainDataset()
     readTrain()
-    for i in pointDataset:
-        if len(i) != 68:
-            print len(i)
+    count = 20
     while True:
         # grab the frame from the threaded video stream, resize it to
         # have a maximum width of 400 pixels, and convert it to
         # grayscale
         frame = vs.read()
-        frame = imutils.resize(frame, width=400)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # detect faces in the grayscale frame
-        rects = detector(gray, 0)
-
-        # loop over the face detections
-        for rect in rects:
-            # determine the facial landmarks for the face region, then
-            # convert the facial landmark (x, y)-coordinates to a NumPy
-            # array
-            shape = predictor(gray, rect)
-            shape = face_utils.shape_to_np(shape)
-
-            # loop over the (x, y)-coordinates for the facial landmarks
-            # and draw them on the image
-
+        
+        vsSVM = getSVM(frame)
+        if vsSVM != []:
+            dif = []
             
-            for (x, y) in shape:
-                cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
+            for svmFrame in svmDataset:
+                sumdif = 1.0
+                for difIndex in range(len(svmFrame)):
+                    sumdif += abs(vsSVM[difIndex]-svmFrame[difIndex])
+                dif.append(round(sumdif,4))
+            print globDir[findLessDifOffset(dif)]
 
         # show the frame
         cv2.imshow("Frame", frame)
