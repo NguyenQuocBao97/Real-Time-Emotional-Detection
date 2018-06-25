@@ -13,6 +13,9 @@ import dlib
 import cv2
 import glob
 import collections as co
+
+import wx
+from UI import HelloFrame
 APPROXIMATE_CATE = 20
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
@@ -31,19 +34,18 @@ print("[INFO] loading facial landmark predictor...")
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor(args["shape_predictor"])
 
-# initialize the video stream and allow the cammera sensor to warmup
-print("[INFO] camera sensor warming up...")
-vs = VideoStream(usePiCamera=args["picamera"] > 0).start()
-time.sleep(2.0)
-# loop over the frames from the video stream
 
+# loop over the frames from the video stream
+svmDataset = []
+globDir = []
 
 def getSVM(datasetFrame):
-    datasetFrame = imutils.resize(datasetFrame, width=400)
+    datasetFrame = imutils.resize(datasetFrame, width=800)
     datasetGray = cv2.cvtColor(datasetFrame, cv2.COLOR_BGR2GRAY)
     datasetRects = detector(datasetGray, 0)
     dist = []
     for rect in datasetRects:
+        cv2.rectangle(datasetFrame, (int(rect.left()),int(rect.top())),(int(rect.right()),int(rect.bottom())),(255,0,0),2)
         shape = predictor(datasetGray, rect)
         shape = face_utils.shape_to_np(shape)
         listx = []
@@ -51,6 +53,7 @@ def getSVM(datasetFrame):
         sumx = 0
         sumy = 0
         for (x, y) in shape:
+            cv2.circle(datasetFrame, (x, y), 2, (0,0,255))
             listx.append(x)
             listy.append(y)
             sumx += x
@@ -130,20 +133,24 @@ def getKeyWithMaxValue(d):
         return "FEAR"
     return key
 
+def main():
+    #init 
+    app = wx.App()
+    frm = HelloFrame(None,0,-1)
+    frm.Show()
+    app.MainLoop()
 
-if __name__ == "__main__":
+    # initialize the video stream and allow the cammera sensor to warmup
+    print("[INFO] camera sensor warming up...")
+    vs = VideoStream(usePiCamera=args["picamera"] > 0).start()
+    time.sleep(2.0)
 
-    globDir = []
-    svmDataset = []
-    if args["train"]:
+    if args["train"]:   
         trainDataset()
     readTrain()
     count = APPROXIMATE_CATE
     d = co.defaultdict(lambda: 0)
     while True:
-        # grab the frame from the threaded video stream, resize it to
-        # have a maximum width of 400 pixels, and convert it to
-        # grayscale
         frame = vs.read()
         frame, vsSVM = getSVM(frame)
         if vsSVM != []:
@@ -159,7 +166,8 @@ if __name__ == "__main__":
             else:
                 count = APPROXIMATE_CATE
                 print getKeyWithMaxValue(d)
-                
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(frame, getKeyWithMaxValue(d),(10,500), font, 4,(255,0,0),2,cv2.LINE_AA)
                 d = co.defaultdict(lambda: 0)
 
         # show the frame
@@ -174,3 +182,8 @@ if __name__ == "__main__":
     # do a bit of cleanup
     cv2.destroyAllWindows()
     vs.stop()
+    
+
+
+if __name__ == '__main__':
+    main()
